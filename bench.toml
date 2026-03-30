@@ -1,0 +1,19 @@
+[benchmark]
+name = "ironwall-edge-judge"
+target = "wasm32-unknown-unknown"
+runtime = "cloudflare-workers"
+
+[latency]
+classification_target_ms = 21
+warmup_requests = 100
+measurement_requests = 1000
+concurrency = 10
+
+[kv]
+namespace = "CITADEL_STATE"
+read_pattern = "session:{id}"
+write_ttl_seconds = 300
+
+[reporting]
+output_format = "json"
+percentiles = [50, 95, 99]
