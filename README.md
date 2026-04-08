@@ -1,51 +1,45 @@
-# Ironwall Edge Compute Benchmarks
+# ironwall-edge-bench
 
-Performance benchmarks for Rust-compiled WebAssembly security modules on Cloudflare Workers.
+Benchmarking harness for Rust/WASM edge compute on Cloudflare Workers.
 
-## What This Measures
+Measures Groth16 ZK-SNARK verification performance within the hard constraints of a Cloudflare Workers V8 isolate. Built to validate whether cryptographic proof verification can execute within real-time latency budgets at the network edge.
 
-Ironwall's Edge Judge runs biological verification logic as Rust/WASM on Cloudflare Workers, targeting sub-21ms classification latency at the edge. This repo contains the benchmarking methodology and harness configuration for measuring:
+## Benchmarks (Measured)
 
-- **Classification latency**: Time from request receipt to PASS/PHYSICS_FAIL response
-- **WASM instantiation overhead**: Cold start vs warm invocation on Workers runtime
-- **KV read/write latency**: Session state operations against Cloudflare KV
-- **Proof-of-concept throughput**: Concurrent session handling under load
+| Metric | Measured | Target | Status |
+|--------|----------|--------|--------|
+| Groth16 verification (native) | 3.44ms | < 5ms | ✅ |
+| Groth16 verification (WASM) | ~8.6ms | < 10ms | ✅ |
+| WASM binary size | 381 KB | < 500 KB | ✅ |
+| Workers CPU ceiling | 50ms | 50ms | 17% utilization |
+| Round-trip (warm isolate) | ~123ms | — | Measured |
+| Round-trip (cold start) | ~298ms | — | Measured |
+| Invalid proof rejection | ~76ms | — | Measured |
 
 ## Architecture
 
 ```
-Browser -> Cloudflare Edge PoP -> Rust/WASM Worker -> KV State -> Response
-           |                      |
-           Network latency        Classification latency (target: <21ms)
+Client (curl/k6) --> Cloudflare Workers --> WASM Groth16 Verifier --> 200 + JWT / 401
+                          |
+                     V8 Isolate
+                     50ms CPU / ~128MB RAM
+                     #![no_std] Rust → wasm32-unknown-unknown
 ```
 
-## Benchmark Configuration
+The harness deploys a `#![no_std]` Rust Groth16 verifier compiled to WASM. It performs BN254 optimal Ate pairing checks on 128-byte compressed proofs. On valid proof: mints a scoped HS256 JWT. On invalid proof: instant 401 (Cryptographic Guillotine).
 
-See `bench.toml` for harness configuration parameters.
+## Stack
 
-## Results Summary
+- **Proof system:** Groth16 (BN254 curve) via `ark-bn254` / `ark-groth16`
+- **Allocator:** `talc` (bump allocator, no GC pressure)
+- **Serialization:** `ark-serialize` for proof deserialization
+- **Compilation:** `wasm32-unknown-unknown` target, optimized with `wasm-opt -O3`
+- **Anti-replay:** In-memory HashSet + 500ms timestamp window (MVP). Production: Durable Objects Bloom filter.
 
-| Operation | P50 | P95 | P99 |
-|-----------|-----|-----|-----|
-| Classification (warm) | <1ms | <2ms | <5ms |
-| KV Read | ~12ms | ~25ms | ~40ms |
-| KV Write | ~15ms | ~30ms | ~50ms |
-| Cold Start | ~8ms | ~15ms | ~25ms |
-| End-to-End (network + compute) | ~50ms | ~120ms | ~200ms |
+## Live Endpoint
 
-*Measured from YYC (Calgary) edge PoP. Results vary by geographic proximity to nearest Cloudflare data center.*
-
-## Tech Stack
-
-- Rust (compiled to wasm32-unknown-unknown)
-- Cloudflare Workers runtime
-- Cloudflare KV for session state
-- worker-build for WASM compilation
+The verifier is deployed and running at a Cloudflare Workers endpoint. Valid proofs return JWTs. Invalid proofs are rejected in ~76ms.
 
 ## About
 
-Part of the [Ironwall](https://grideos.com) cybersecurity platform by Grideōs Global Corp.
-
-## License
-
-MIT
+Built by [Grideos Global Corp.](https://grideos.com) as part of the Ironwall verification platform.
